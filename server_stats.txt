@@ -1,0 +1,8 @@
+
+--- SERVER STATS ---
+Active clients: 2
+Clients: 
+127.0.0.1:57238 (admin) - mesazhe: 3, bytes: 28
+127.0.0.1:51825 (reader) - mesazhe: 1, bytes: 5
+Total Traffic: 33 bytes
+--------------------
