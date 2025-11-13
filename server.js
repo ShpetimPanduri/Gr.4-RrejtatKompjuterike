@@ -98,6 +98,14 @@ wss.on("connection", (ws) => {
     } else if (msg.startsWith("/delete ")) {
       const filename = msg.slice(8).trim();
       const filePath = path.join(FILES_DIR, filename);
+
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+        ws.send(`U fshi me sukses: ${filename}`);
+        sendList();
+      } else {
+        ws.send("Skedari nuk u gjet për fshirje!");
+      }
     } else if (ws.waitingForFile && data instanceof Buffer) {
       const { name } = ws.waitingForFile;
       const safeName = path.basename(name);
