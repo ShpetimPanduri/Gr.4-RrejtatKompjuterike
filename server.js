@@ -134,6 +134,13 @@ wss.on("connection", (ws) => {
         return;
     }
 
+    const stats = fs.statSync(filePath);
+
+    const infoTxt =
+        `INFO for '${filename}':\n` +
+        `• Size: ${stats.size} bytes\n` +
+        `• Created: ${stats.birthtime}\n` +
+        `• Last modified: ${stats.mtime}\n`;
 
     } else if (ws.waitingForFile && data instanceof Buffer) {
       const { name } = ws.waitingForFile;
