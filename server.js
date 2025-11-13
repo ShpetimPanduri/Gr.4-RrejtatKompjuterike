@@ -121,6 +121,13 @@ wss.on("connection", (ws) => {
       } else {
         ws.send(` Asnjë file nuk përmban fjalën '${keyword}'.`);
       }
+    } else if (msg.startsWith("/info ")) {
+    const filename = msg.slice(6).trim();
+
+    if (!filename) {
+        ws.send("Usage: /info <filename>");
+        return;
+    }
     } else if (ws.waitingForFile && data instanceof Buffer) {
       const { name } = ws.waitingForFile;
       const safeName = path.basename(name);
