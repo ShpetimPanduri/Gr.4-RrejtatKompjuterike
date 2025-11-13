@@ -11,7 +11,7 @@ let adminAssigned = false;
 const clients = new Map();
 
 console.log("Serveri është gati → ws://localhost:8080");
-console.log("Hap index.html në shfletues → tab-i i parë bëhet ADMIN\n");
+console.log("Hap index.html në shfletues → tab-i i parë bëhet admin\n");
 
 wss.on("connection", (ws) => {
   if (clients.size >= 4) {
@@ -26,8 +26,8 @@ wss.on("connection", (ws) => {
 
   ws.send(
     isAdmin
-      ? "Ti je ADMIN! Komandat: /list | /upload <emri> | /download <emri> | /delete <emri>"
-      : "Ti je LEXUES. Prit derisa admini të ngarkojë skedarë."
+      ? "Ti je admin! Komandat: /list | /upload <emri> | /download <emri> | /delete <emri>"
+      : "Ti je user. Prit derisa admini të ngarkojë skedarë."
   );
 
   const sendList = () => {
@@ -36,7 +36,7 @@ wss.on("connection", (ws) => {
       const madhesia = (stats.size / 1024).toFixed(1);
       return `${f} (${madhesia} KB)`;
     });
-    const lista = files.length > 0 ? files.join(" | ") : "folder bosh";
+    const lista = files.length > 0 ? files.join(" | ") : "Skedar bosh";
     wss.clients.forEach(
       (c) => c.readyState === 1 && c.send(`Skedarët: ${lista}`)
     );
@@ -149,7 +149,7 @@ setInterval(() => {
   const now = Date.now();
   for (const [ws, data] of clients) {
     if (now - data.lastSeen > 120000) {
-      ws.close(1000, "Timeout – 2 minuta pa aktivitet");
+      ws.close(1000, "Timeout: 2 minuta pa aktivitet");
     }
   }
 }, 5000);

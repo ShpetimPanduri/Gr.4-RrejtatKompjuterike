@@ -10,16 +10,16 @@ const rl = readline.createInterface({
   output: process.stdout,
 });
 
-console.log("Klienti eshte gati. Shtyp komande per serverin:");
-console.log("Per admin: /list, /read <file>, /STATS");
-console.log("Per perdorues te zakonshem: cdo mesazh tjeter.\n");
+console.log("Klienti është gati. Shtyp komandë për serverin:");
+console.log("Për admin: /list, /read <file>, /STATS");
+console.log("Për përdorues të zakonshëm: qdo mesazh tjetër.\n");
 
 function sendMessage(msg) {
   client.send(msg, SERVER_PORT, SERVER_HOST);
 }
 
 client.on("message", (msg) => {
-  console.log(`Pergjigje nga serveri:\n${msg.toString()}`);
+  console.log(`Përgjigje nga serveri:\n${msg.toString()}`);
   rl.prompt();
 });
 
