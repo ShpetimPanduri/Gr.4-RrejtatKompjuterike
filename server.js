@@ -142,6 +142,8 @@ wss.on("connection", (ws) => {
         `• Created: ${stats.birthtime}\n` +
         `• Last modified: ${stats.mtime}\n`;
 
+    ws.send(infoTxt);
+
     } else if (ws.waitingForFile && data instanceof Buffer) {
       const { name } = ws.waitingForFile;
       const safeName = path.basename(name);
