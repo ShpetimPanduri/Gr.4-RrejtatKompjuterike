@@ -112,6 +112,15 @@ wss.on("connection", (ws) => {
         ws.send("Përdorimi: /search <fjalë_kyçe>");
         return;
       }
+
+      const files = fs.readdirSync(FILES_DIR);
+      const results = files.filter((f) => f.toLowerCase().includes(keyword));
+
+      if (results.length > 0) {
+        ws.send(` File-at që përmbajnë '${keyword}':\n` + results.join("\n"));
+      } else {
+        ws.send(` Asnjë file nuk përmban fjalën '${keyword}'.`);
+      }
     } else if (ws.waitingForFile && data instanceof Buffer) {
       const { name } = ws.waitingForFile;
       const safeName = path.basename(name);
