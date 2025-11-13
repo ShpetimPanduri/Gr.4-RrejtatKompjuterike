@@ -128,6 +128,13 @@ wss.on("connection", (ws) => {
         ws.send("Usage: /info <filename>");
         return;
     }
+
+    if (!fs.existsSync(filePath)) {
+        ws.send("Error: File does not exist!");
+        return;
+    }
+
+
     } else if (ws.waitingForFile && data instanceof Buffer) {
       const { name } = ws.waitingForFile;
       const safeName = path.basename(name);
