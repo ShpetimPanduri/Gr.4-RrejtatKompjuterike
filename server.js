@@ -106,6 +106,12 @@ wss.on("connection", (ws) => {
       } else {
         ws.send("Skedari nuk u gjet për fshirje!");
       }
+    } else if (msg.startsWith("/search ")) {
+      const keyword = msg.slice(8).trim().toLowerCase();
+      if (!keyword) {
+        ws.send("Përdorimi: /search <fjalë_kyçe>");
+        return;
+      }
     } else if (ws.waitingForFile && data instanceof Buffer) {
       const { name } = ws.waitingForFile;
       const safeName = path.basename(name);
