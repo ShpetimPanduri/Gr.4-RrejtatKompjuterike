@@ -1,180 +1,176 @@
-// server.js - SERVER SKEDARËSH ME WEBSOCKET (në shqip)
+// server.js - LEXUES: VETËM /read | ADMIN: TË GJITHA | Bytes + KB
 import { WebSocketServer } from "ws";
 import fs from "fs";
 import path from "path";
+import os from "os";
 
-const wss = new WebSocketServer({ port: 8080 });
+const PORT = 8080;
+const HOST = "0.0.0.0";
 const FILES_DIR = "./files";
 if (!fs.existsSync(FILES_DIR)) fs.mkdirSync(FILES_DIR);
 
+const wss = new WebSocketServer({ port: PORT, host: HOST });
 let adminAssigned = false;
 const clients = new Map();
 
-console.log("Serveri është gati → ws://localhost:8080");
-console.log("Hap index.html në shfletues → tab-i i parë bëhet admin\n");
+console.log(`Serveri aktiv në ws://${getLocalIP()}:${PORT}`);
+console.log("Hap index.html → Tab-i i parë = ADMIN\n");
 
-wss.on("connection", (ws) => {
+function getLocalIP() {
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal) return iface.address;
+    }
+  }
+  return 'localhost';
+}
+
+// === FORMATIMI I MADHËSISË ===
+function formatSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  return `${(bytes / 1024).toFixed(1)} KB`;
+}
+
+// === LISTA E SKEDARËVE (vetëm për Admin) ===
+const sendList = (ws) => {
+  const txtFiles = fs.readdirSync(FILES_DIR).filter(f => f.endsWith(".txt"));
+  const files = txtFiles.map(f => {
+    const stats = fs.statSync(path.join(FILES_DIR, f));
+    return `${f} (${formatSize(stats.size)})`;
+  });
+  const lista = files.length > 0 ? files.join(" | ") : "bosh";
+  ws.send(`Skedarët (.txt): ${lista}`);
+};
+
+wss.on("connection", (ws, req) => {
   if (clients.size >= 4) {
-    ws.close(1013, "Serveri është plot. Provo më vonë.");
+    ws.close(1013, "Serveri plot.");
     return;
   }
 
   const isAdmin = !adminAssigned;
   if (isAdmin) adminAssigned = true;
 
-  clients.set(ws, { role: isAdmin ? "admin" : "lexues", lastSeen: Date.now() });
+  clients.set(ws, {
+    role: isAdmin ? "admin" : "lexues",
+    lastSeen: Date.now()
+  });
 
-  ws.send(
-    isAdmin
-      ? "Ti je admin! Komandat: /list | /upload <emri> | /download <emri> | /delete <emri>"
-      : "Ti je user. Prit derisa admini të ngarkojë skedarë."
+  ws.send(isAdmin
+    ? "ADMIN:1"  // Përdorim kod për UI
+    : "LEXUES:0" // Përdorim kod për UI
   );
 
-  const sendList = () => {
-    const files = fs.readdirSync(FILES_DIR).map((f) => {
-      const stats = fs.statSync(path.join(FILES_DIR, f));
-      const madhesia = (stats.size / 1024).toFixed(1);
-      return `${f} (${madhesia} KB)`;
-    });
-    const lista = files.length > 0 ? files.join(" | ") : "Skedar bosh";
-    wss.clients.forEach(
-      (c) => c.readyState === 1 && c.send(`Skedarët: ${lista}`)
-    );
-  };
+  if (isAdmin) sendList(ws);
 
-  ws.on("message", async (data) => {
-    const msg = data.toString().trim();
+  ws.on("message", (data) => {
     const client = clients.get(ws);
     client.lastSeen = Date.now();
+    const msg = data.toString().trim();
 
-    if (client.role !== "admin") {
-      ws.send("Vetëm admini mund të përdorë komandat!");
+    // === LEXUESIT: VETËM /read ===
+    if (client.role === "lexues") {
+      if (msg.startsWith("/read ")) {
+        const filename = msg.slice(6).trim();
+        if (!filename.endsWith(".txt")) {
+          ws.send("Gabim: Vetëm skedarë .txt lejohen.");
+          return;
+        }
+        const filePath = path.join(FILES_DIR, filename);
+        if (fs.existsSync(filePath) && fs.statSync(filePath).size < 100 * 1024) {
+          const content = fs.readFileSync(filePath, "utf8");
+          ws.send(`Përmbajtja e ${filename}:\n${content}`);
+        } else if (fs.existsSync(filePath)) {
+          ws.send(`Skedari ${filename} është shumë i madh (>100KB).`);
+        } else {
+          ws.send("Skedari nuk u gjet.");
+        }
+      } else {
+        ws.send("LEXUES: Vetëm /read <emri.txt> lejohet.");
+      }
       return;
     }
 
+    // === ADMINI: TË GJITHA ===
     if (msg === "/list") {
-      sendList();
+      sendList(ws);
+    } else if (msg.startsWith("/read ")) {
+      const filename = msg.slice(6).trim();
+      if (!filename.endsWith(".txt")) return ws.send("Vetëm .txt lejohen.");
+      const filePath = path.join(FILES_DIR, filename);
+      if (fs.existsSync(filePath) && fs.statSync(filePath).size < 100 * 1024) {
+        const content = fs.readFileSync(filePath, "utf8");
+        ws.send(`Përmbajtja e ${filename}:\n${content}`);
+      } else {
+        ws.send("Skedari është shumë i madh ose nuk u gjet.");
+      }
     } else if (msg.startsWith("/upload ")) {
       const filename = msg.slice(8).trim();
-      if (!filename) {
-        ws.send("Përdorimi: /upload emri_skeda.txt");
-        return;
-      }
-      ws.send(
-        `Gati për ngarkim: "${filename}". Tërhiq skedarin këtu ose kliko poshtë.`
-      );
+      if (!filename.endsWith(".txt")) return ws.send("Vetëm .txt lejohen!");
+      ws.send(`Gati për ngarkim: "${filename}"`);
       ws.waitingForFile = { name: filename };
     } else if (msg.startsWith("/download ")) {
       const filename = msg.slice(10).trim();
+      if (!filename.endsWith(".txt")) return ws.send("Vetëm .txt mund të shkarkohen.");
       const filePath = path.join(FILES_DIR, filename);
-      if (!fs.existsSync(filePath)) {
-        ws.send("Skedari nuk u gjet!");
-        return;
-      }
-
+      if (!fs.existsSync(filePath)) return ws.send("Skedari nuk u gjet!");
       const fileData = fs.readFileSync(filePath);
       const base64 = fileData.toString("base64");
-      const mime = filename.endsWith(".png")
-        ? "image/png"
-        : filename.endsWith(".jpg") || filename.endsWith(".jpeg")
-        ? "image/jpeg"
-        : filename.endsWith(".pdf")
-        ? "application/pdf"
-        : filename.endsWith(".zip")
-        ? "application/zip"
-        : filename.endsWith(".mp4")
-        ? "video/mp4"
-        : "application/octet-stream";
-
-      ws.send(
-        JSON.stringify({
-          type: "download",
-          filename,
-          data: base64,
-          mime,
-        })
-      );
-      ws.send(`Po shkarkohet: ${filename}`);
+      ws.send(JSON.stringify({ type: "download", filename, data: base64, mime: "text/plain" }));
+      ws.send(`Shkarkimi filloi: ${filename}`);
     } else if (msg.startsWith("/delete ")) {
       const filename = msg.slice(8).trim();
+      if (!filename.endsWith(".txt")) return ws.send("Vetëm .txt mund të fshihen.");
       const filePath = path.join(FILES_DIR, filename);
-
       if (fs.existsSync(filePath)) {
         fs.unlinkSync(filePath);
-        ws.send(`U fshi me sukses: ${filename}`);
-        sendList();
+        ws.send(`U fshi: ${filename}`);
       } else {
-        ws.send("Skedari nuk u gjet për fshirje!");
+        ws.send("Skedari nuk u gjet.");
       }
     } else if (msg.startsWith("/search ")) {
       const keyword = msg.slice(8).trim().toLowerCase();
-      if (!keyword) {
-        ws.send("Përdorimi: /search <fjalë_kyçe>");
-        return;
-      }
-
-      const files = fs.readdirSync(FILES_DIR);
-      const results = files.filter((f) => f.toLowerCase().includes(keyword));
-
-      if (results.length > 0) {
-        ws.send(` File-at që përmbajnë '${keyword}':\n` + results.join("\n"));
-      } else {
-        ws.send(` Asnjë file nuk përmban fjalën '${keyword}'.`);
-      }
+      const matches = fs.readdirSync(FILES_DIR)
+        .filter(f => f.endsWith(".txt") && f.toLowerCase().includes(keyword));
+      ws.send(matches.length > 0
+        ? `Rezultatet: ${matches.join(", ")}`
+        : `Asnjë .txt nuk përmban "${keyword}"`);
     } else if (msg.startsWith("/info ")) {
-    const filename = msg.slice(6).trim();
-
-    if (!filename) {
-        ws.send("Usage: /info <filename>");
-        return;
-    }
-
-    if (!fs.existsSync(filePath)) {
-        ws.send("Error: File does not exist!");
-        return;
-    }
-
-    const stats = fs.statSync(filePath);
-
-    const infoTxt =
-        `INFO for '${filename}':\n` +
-        `• Size: ${stats.size} bytes\n` +
-        `• Created: ${stats.birthtime}\n` +
-        `• Last modified: ${stats.mtime}\n`;
-
-    ws.send(infoTxt);
-
+      const filename = msg.slice(6).trim();
+      if (!filename.endsWith(".txt")) return ws.send("Vetëm .txt kanë info.");
+      const filePath = path.join(FILES_DIR, filename);
+      if (fs.existsSync(filePath)) {
+        const stats = fs.statSync(filePath);
+        ws.send(`Info për ${filename}:\nMadhësia: ${formatSize(stats.size)}\nKrijuar: ${stats.birthtime.toLocaleString("sq-AL")}\nModifikuar: ${stats.mtime.toLocaleString("sq-AL")}`);
+      } else {
+        ws.send("Skedari nuk u gjet.");
+      }
     } else if (ws.waitingForFile && data instanceof Buffer) {
       const { name } = ws.waitingForFile;
+      if (!name.endsWith(".txt")) {
+        ws.send("Gabim: Vetëm .txt lejohen!");
+        delete ws.waitingForFile;
+        return;
+      }
       const safeName = path.basename(name);
       fs.writeFileSync(path.join(FILES_DIR, safeName), data);
-      ws.send(`U ngarkua me sukses: ${safeName}`);
+      ws.send(`U ngarkua: ${safeName}`);
       delete ws.waitingForFile;
-      sendList();
-    } else if (msg.startsWith("/")) {
-      ws.send("Komandë e panjohur. Provo: /list, /upload, /download, /delete");
     } else {
-      wss.clients.forEach(
-        (c) => c.readyState === 1 && c.send(`[ADMIN] ${msg}`)
-      );
+      ws.send(`[ADMIN] ${msg}`);
     }
   });
 
   ws.on("close", () => {
     if (clients.get(ws)?.role === "admin") adminAssigned = false;
     clients.delete(ws);
-    console.log("Një klient u shkëput.");
   });
 });
 
-// Largimi automatik pas 2 minutash pa aktivitet
 setInterval(() => {
   const now = Date.now();
   for (const [ws, data] of clients) {
-    if (now - data.lastSeen > 120000) {
-      ws.close(1000, "Timeout: 2 minuta pa aktivitet");
-    }
+    if (now - data.lastSeen > 120000) ws.close(1000, "Timeout");
   }
 }, 5000);
-
-sendList(); // Lista fillestare

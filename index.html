@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="sq">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Server .TXT - Gr.4</title>
+  <style>
+    body { background: #000; color: #0f0; font-family: 'Courier New', monospace; margin: 0; padding: 15px; }
+    h1 { text-align: center; color: #0ff; margin: 0 0 10px; font-size: 1.5em; }
+    #role { text-align: center; font-weight: bold; margin: 8px 0; }
+    #log { 
+      overflow-y: auto; background: #111; padding: 12px; border: 2px solid #0f0; 
+      margin: 10px 0; font-size: 15px; 
+      height: 66vh; /* Default për Admin */
+    }
+    input { 
+      width: 100%; max-width: 100%; padding: 10px; font-size: 16px; 
+      background: #000; color: #0f0; border: 2px solid #0f0; 
+      box-sizing: border-box; margin: 8px 0; 
+    }
+    .drag { 
+      border: 3px dashed #0f0; padding: 30px; text-align: center; 
+      margin: 15px 0; font-size: 18px; cursor: pointer; 
+    }
+    .drag.over { background: #003300; border-color: #0ff; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <h1>SERVER .TXT – VETËM SKEDARË TEKST</h1>
+  <div id="role"></div>
+  <div id="log"></div>
+  <input id="cmd" placeholder="/read file.txt" autofocus />
+  <div id="drop" class="drag hidden">TËRHIQ .TXT SKEDARIN KËTU (ADMIN)</div>
+
+  <script>
+    const ws = new WebSocket("ws://localhost:8080");
+    const log = document.getElementById("log");
+    const cmd = document.getElementById("cmd");
+    const drop = document.getElementById("drop");
+    const roleDiv = document.getElementById("role");
+
+    function shto(m, c = "#0f0") {
+      const d = document.createElement("div"); 
+      d.textContent = m; 
+      d.style.color = c; 
+      log.appendChild(d);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    ws.onopen = () => shto("Lidhur me serverin...", "#0f0");
+
+    ws.onmessage = e => {
+      if (typeof e.data === "string") {
+        // === DETEKTO ROLIN DHE PËRSHTAT UI-në ===
+        if (e.data.includes("LEXUES")) {
+          roleDiv.textContent = "LEXUES – Vetëm /read <emri.txt>";
+          roleDiv.style.color = "#0ff";
+          drop.classList.add("hidden");
+          cmd.placeholder = "/read file.txt";
+          log.style.height = "76vh"; // MË I MADH PËR LEXUES
+        } else if (e.data.includes("ADMIN")) {
+          roleDiv.textContent = "ADMIN – Privilegje të plota";
+          roleDiv.style.color = "#ff0";
+          drop.classList.remove("hidden");
+          cmd.placeholder = "/list | /read | /upload | /download | /delete | /search | /info";
+          log.style.height = "62vh"; // DEFAULT PËR ADMIN
+        }
+
+        try {
+          const msg = JSON.parse(e.data);
+          if (msg.type === "download") {
+            const a = document.createElement("a");
+            a.href = `data:${msg.mime};base64,${msg.data}`;
+            a.download = msg.filename; 
+            a.click();
+            shto(`Shkarkuar: ${msg.filename}`, "#0ff");
+            return;
+          }
+        } catch {}
+        shto(e.data);
+      }
+    };
+
+    cmd.onkeypress = e => {
+      if (e.key === "Enter" && cmd.value.trim()) {
+        ws.send(cmd.value.trim());
+        shto(`Ti: ${cmd.value.trim()}`, "#ff0");
+        cmd.value = "";
+      }
+    };
+
+    // Drag & Drop (vetëm për Admin)
+    if (!drop.classList.contains("hidden")) {
+      ["dragover", "dragenter"].forEach(ev => drop.addEventListener(ev, e => { 
+        e.preventDefault(); drop.classList.add("over"); 
+      }));
+      ["dragleave", "dragend", "drop"].forEach(ev => drop.addEventListener(ev, e => { 
+        e.preventDefault(); drop.classList.remove("over"); 
+      }));
+      drop.addEventListener("drop", e => {
+        e.preventDefault();
+        const file = e.dataTransfer.files[0];
+        if (file && file.name.endsWith(".txt")) {
+          shto(`Ngarkim: ${file.name}...`);
+          const r = new FileReader(); 
+          r.onload = () => ws.send(r.result); 
+          r.readAsArrayBuffer(file);
+        } else {
+          shto("Gabim: Vetëm .txt files lejohen!", "#f00");
+        }
+      });
+    }
+  </script>
+</body>
+</html>
