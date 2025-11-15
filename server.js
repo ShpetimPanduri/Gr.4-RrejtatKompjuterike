@@ -1,176 +1,100 @@
-// server.js - LEXUES: VETËM /read | ADMIN: TË GJITHA | Bytes + KB
-import { WebSocketServer } from "ws";
+import dgram from "dgram";
 import fs from "fs";
-import path from "path";
 import os from "os";
 
-const PORT = 8080;
-const HOST = "0.0.0.0";
-const FILES_DIR = "./files";
-if (!fs.existsSync(FILES_DIR)) fs.mkdirSync(FILES_DIR);
+const PORT = 5000; 
+const HOST = "0.0.0.0"; 
+const MAX_CLIENTS = 4;   //maksimumi 4 klient
+const TIMEOUT = 120000;   //120 sekonda
 
-const wss = new WebSocketServer({ port: PORT, host: HOST });
-let adminAssigned = false;
-const clients = new Map();
+const server = dgram.createSocket("udp4");
+let clients = {}; 
 
-console.log(`Serveri aktiv në ws://${getLocalIP()}:${PORT}`);
-console.log("Hap index.html → Tab-i i parë = ADMIN\n");
+// funksioni per kthim te statistikave
+function logStats() {
+  const activeClients = Object.entries(clients)
+    .map(([key, data]) => `${key} (${data.role}) - mesazhe: ${data.messages}, bytes: ${data.bytes}`)
+    .join(os.EOL);
 
-function getLocalIP() {
-  const interfaces = os.networkInterfaces();
-  for (const name of Object.keys(interfaces)) {
-    for (const iface of interfaces[name]) {
-      if (iface.family === 'IPv4' && !iface.internal) return iface.address;
-    }
-  }
-  return 'localhost';
+  const totalTraffic = Object.values(clients).reduce((sum, c) => sum + c.bytes, 0);
+
+  const logData = `
+--- SERVER STATS ---
+Active clients: ${Object.keys(clients).length}
+Clients: 
+${activeClients}
+Total Traffic: ${totalTraffic} bytes
+--------------------
+`;
+
+  console.log(logData); 
+  fs.writeFileSync("server_stats.txt", logData);
+
+  return logData; 
 }
 
-// === FORMATIMI I MADHËSISË ===
-function formatSize(bytes) {
-  if (bytes < 1024) return `${bytes} B`;
-  return `${(bytes / 1024).toFixed(1)} KB`;
-}
+server.on("message", (msg, rinfo) => {
+  const clientKey = `${rinfo.address}:${rinfo.port}`;
+  const message = msg.toString().trim();
 
-// === LISTA E SKEDARËVE (vetëm për Admin) ===
-const sendList = (ws) => {
-  const txtFiles = fs.readdirSync(FILES_DIR).filter(f => f.endsWith(".txt"));
-  const files = txtFiles.map(f => {
-    const stats = fs.statSync(path.join(FILES_DIR, f));
-    return `${f} (${formatSize(stats.size)})`;
-  });
-  const lista = files.length > 0 ? files.join(" | ") : "bosh";
-  ws.send(`Skedarët (.txt): ${lista}`);
-};
-
-wss.on("connection", (ws, req) => {
-  if (clients.size >= 4) {
-    ws.close(1013, "Serveri plot.");
-    return;
-  }
-
-  const isAdmin = !adminAssigned;
-  if (isAdmin) adminAssigned = true;
-
-  clients.set(ws, {
-    role: isAdmin ? "admin" : "lexues",
-    lastSeen: Date.now()
-  });
-
-  ws.send(isAdmin
-    ? "ADMIN:1"  // Përdorim kod për UI
-    : "LEXUES:0" // Përdorim kod për UI
-  );
-
-  if (isAdmin) sendList(ws);
-
-  ws.on("message", (data) => {
-    const client = clients.get(ws);
-    client.lastSeen = Date.now();
-    const msg = data.toString().trim();
-
-    // === LEXUESIT: VETËM /read ===
-    if (client.role === "lexues") {
-      if (msg.startsWith("/read ")) {
-        const filename = msg.slice(6).trim();
-        if (!filename.endsWith(".txt")) {
-          ws.send("Gabim: Vetëm skedarë .txt lejohen.");
-          return;
-        }
-        const filePath = path.join(FILES_DIR, filename);
-        if (fs.existsSync(filePath) && fs.statSync(filePath).size < 100 * 1024) {
-          const content = fs.readFileSync(filePath, "utf8");
-          ws.send(`Përmbajtja e ${filename}:\n${content}`);
-        } else if (fs.existsSync(filePath)) {
-          ws.send(`Skedari ${filename} është shumë i madh (>100KB).`);
-        } else {
-          ws.send("Skedari nuk u gjet.");
-        }
-      } else {
-        ws.send("LEXUES: Vetëm /read <emri.txt> lejohet.");
-      }
+  //kushti per maksimumin e klienteve
+  if (!clients[clientKey]) {
+    if (Object.keys(clients).length >= MAX_CLIENTS) {
+      server.send("Server full. Try again later.", rinfo.port, rinfo.address);
       return;
     }
 
-    // === ADMINI: TË GJITHA ===
-    if (msg === "/list") {
-      sendList(ws);
-    } else if (msg.startsWith("/read ")) {
-      const filename = msg.slice(6).trim();
-      if (!filename.endsWith(".txt")) return ws.send("Vetëm .txt lejohen.");
-      const filePath = path.join(FILES_DIR, filename);
-      if (fs.existsSync(filePath) && fs.statSync(filePath).size < 100 * 1024) {
-        const content = fs.readFileSync(filePath, "utf8");
-        ws.send(`Përmbajtja e ${filename}:\n${content}`);
-      } else {
-        ws.send("Skedari është shumë i madh ose nuk u gjet.");
-      }
-    } else if (msg.startsWith("/upload ")) {
-      const filename = msg.slice(8).trim();
-      if (!filename.endsWith(".txt")) return ws.send("Vetëm .txt lejohen!");
-      ws.send(`Gati për ngarkim: "${filename}"`);
-      ws.waitingForFile = { name: filename };
-    } else if (msg.startsWith("/download ")) {
-      const filename = msg.slice(10).trim();
-      if (!filename.endsWith(".txt")) return ws.send("Vetëm .txt mund të shkarkohen.");
-      const filePath = path.join(FILES_DIR, filename);
-      if (!fs.existsSync(filePath)) return ws.send("Skedari nuk u gjet!");
-      const fileData = fs.readFileSync(filePath);
-      const base64 = fileData.toString("base64");
-      ws.send(JSON.stringify({ type: "download", filename, data: base64, mime: "text/plain" }));
-      ws.send(`Shkarkimi filloi: ${filename}`);
-    } else if (msg.startsWith("/delete ")) {
-      const filename = msg.slice(8).trim();
-      if (!filename.endsWith(".txt")) return ws.send("Vetëm .txt mund të fshihen.");
-      const filePath = path.join(FILES_DIR, filename);
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-        ws.send(`U fshi: ${filename}`);
-      } else {
-        ws.send("Skedari nuk u gjet.");
-      }
-    } else if (msg.startsWith("/search ")) {
-      const keyword = msg.slice(8).trim().toLowerCase();
-      const matches = fs.readdirSync(FILES_DIR)
-        .filter(f => f.endsWith(".txt") && f.toLowerCase().includes(keyword));
-      ws.send(matches.length > 0
-        ? `Rezultatet: ${matches.join(", ")}`
-        : `Asnjë .txt nuk përmban "${keyword}"`);
-    } else if (msg.startsWith("/info ")) {
-      const filename = msg.slice(6).trim();
-      if (!filename.endsWith(".txt")) return ws.send("Vetëm .txt kanë info.");
-      const filePath = path.join(FILES_DIR, filename);
-      if (fs.existsSync(filePath)) {
-        const stats = fs.statSync(filePath);
-        ws.send(`Info për ${filename}:\nMadhësia: ${formatSize(stats.size)}\nKrijuar: ${stats.birthtime.toLocaleString("sq-AL")}\nModifikuar: ${stats.mtime.toLocaleString("sq-AL")}`);
-      } else {
-        ws.send("Skedari nuk u gjet.");
-      }
-    } else if (ws.waitingForFile && data instanceof Buffer) {
-      const { name } = ws.waitingForFile;
-      if (!name.endsWith(".txt")) {
-        ws.send("Gabim: Vetëm .txt lejohen!");
-        delete ws.waitingForFile;
-        return;
-      }
-      const safeName = path.basename(name);
-      fs.writeFileSync(path.join(FILES_DIR, safeName), data);
-      ws.send(`U ngarkua: ${safeName}`);
-      delete ws.waitingForFile;
-    } else {
-      ws.send(`[ADMIN] ${msg}`);
-    }
-  });
+    clients[clientKey] = {
+      port: rinfo.port,
+      lastSeen: Date.now(),
+      messages: 0,
+      bytes: 0,
+      role: Object.keys(clients).length === 0 ? "admin" : "reader", // vetem klienti i pare admin
+    };
+    console.log(`Klient i ri: ${clientKey} (${clients[clientKey].role})`);
+  }
 
-  ws.on("close", () => {
-    if (clients.get(ws)?.role === "admin") adminAssigned = false;
-    clients.delete(ws);
-  });
+  //update i statistikave
+  clients[clientKey].lastSeen = Date.now();
+  clients[clientKey].messages++;
+  clients[clientKey].bytes += Buffer.byteLength(msg);
+
+  //komandat per klientin admin
+  if (clients[clientKey].role === "admin" && message.startsWith("/")) {
+    if (message === "/list") {
+      const files = fs.readdirSync("./files").join(", ");
+      server.send(`Files: ${files}`, rinfo.port, rinfo.address);
+    } else if (message.startsWith("/read ")) {
+      const file = message.split(" ")[1];
+      try {
+        const content = fs.readFileSync(`./files/${file}`, "utf8");
+        server.send(content, rinfo.port, rinfo.address);
+      } catch {
+        server.send("File not found.", rinfo.port, rinfo.address);
+      }
+    } else if (message === "/STATS") {
+      const statsMsg = logStats();
+      server.send(statsMsg, rinfo.port, rinfo.address);
+    } else {
+      server.send("Unknown command.", rinfo.port, rinfo.address);
+    }
+  } else {
+    //klient i zakonshem (vetem read)
+    server.send(`Server mori: "${message}"`, rinfo.port, rinfo.address);
+  }
 });
 
+server.bind(PORT, HOST, () => {
+  console.log(`Server UDP aktiv ne ${HOST}:${PORT}`);
+});
+
+//kontrolli per timeout
 setInterval(() => {
   const now = Date.now();
-  for (const [ws, data] of clients) {
-    if (now - data.lastSeen > 120000) ws.close(1000, "Timeout");
+  for (const [key, data] of Object.entries(clients)) {
+    if (now - data.lastSeen > TIMEOUT) {
+      console.log(`Klienti ${key} u shkeput (timeout)`);
+      delete clients[key];
+    }
   }
 }, 5000);
