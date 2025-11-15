@@ -4,7 +4,7 @@ import os from "os";
 
 const PORT = 5000; 
 const HOST = "0.0.0.0"; 
-const MAX_CLIENTS = 4;   //maksimumi 4 klient
+const MAX_CLIENTS = 4;    //maksimumi 4 klient
 const TIMEOUT = 120000;   //120 sekonda
 
 const server = dgram.createSocket("udp4");
@@ -59,12 +59,16 @@ server.on("message", (msg, rinfo) => {
   clients[clientKey].messages++;
   clients[clientKey].bytes += Buffer.byteLength(msg);
 
-  //komandat per klientin admin
-  if (clients[clientKey].role === "admin" && message.startsWith("/")) {
-    if (message === "/list") {
+  const isAdmin = clients[clientKey].role === "admin";
+
+  // ----------------- ADMIN COMMANDS -----------------
+  if (message.startsWith("/") && isAdmin) {
+
+    if (message === "/list") {  //komanda list
       const files = fs.readdirSync("./files").join(", ");
       server.send(`Files: ${files}`, rinfo.port, rinfo.address);
-    } else if (message.startsWith("/read ")) {
+
+    } else if (message.startsWith("/read ")) {  //komanda read
       const file = message.split(" ")[1];
       try {
         const content = fs.readFileSync(`./files/${file}`, "utf8");
@@ -72,14 +76,71 @@ server.on("message", (msg, rinfo) => {
       } catch {
         server.send("File not found.", rinfo.port, rinfo.address);
       }
-    } else if (message === "/STATS") {
+
+    } else if (message === "/STATS") {   //per stats
       const statsMsg = logStats();
       server.send(statsMsg, rinfo.port, rinfo.address);
+
+    // ----------------- /upload -----------------
+    } else if (message.startsWith("/upload ")) {
+      const file = message.split(" ")[1];
+      const fileContent = message.split(" ").slice(2).join(" ");
+
+      try {
+        fs.writeFileSync(`./files/${file}`, fileContent);
+        server.send(`File "${file}" u ruajt me sukses.`, rinfo.port, rinfo.address);
+      } catch {
+        server.send("Gabim gjatë ruajtjes së file-it.", rinfo.port, rinfo.address);
+      }
+
+    // ----------------- /download -----------------
+    } else if (message.startsWith("/download ")) {
+      const file = message.split(" ")[1];
+      try {
+        const content = fs.readFileSync(`./files/${file}`, "utf8");
+        server.send(`FILE_DATA ${file} ${content}`, rinfo.port, rinfo.address);
+      } catch {
+        server.send("File nuk u gjet.", rinfo.port, rinfo.address);
+      }
+
+    // ----------------- /delete -----------------
+    } else if (message.startsWith("/delete ")) {
+      const file = message.split(" ")[1];
+      try {
+        fs.unlinkSync(`./files/${file}`);
+        server.send(`File "${file}" u fshi me sukses.`, rinfo.port, rinfo.address);
+      } catch {
+        server.send("File nuk u gjet ose nuk mund të fshihej.", rinfo.port, rinfo.address);
+      }
+
+    // ----------------- /search -----------------
+    } else if (message.startsWith("/search ")) {
+      const keyword = message.split(" ")[1];
+      const files = fs.readdirSync("./files");
+      const matches = files.filter(f => f.includes(keyword));
+      server.send(`Rezultatet: ${matches.join(", ") || "Asnje file nuk përputhet."}`, rinfo.port, rinfo.address);
+
+    // ----------------- /info -----------------
+    } else if (message.startsWith("/info ")) {
+      const file = message.split(" ")[1];
+      try {
+        const stats = fs.statSync(`./files/${file}`);
+        const infoMsg = `
+        Madhesia: ${stats.size} bytes
+        Krijuar: ${stats.birthtime}
+        Modifikuar: ${stats.mtime}
+        `;
+        server.send(infoMsg, rinfo.port, rinfo.address);
+      } catch {
+        server.send("File nuk u gjet.", rinfo.port, rinfo.address);
+      }
+
     } else {
       server.send("Unknown command.", rinfo.port, rinfo.address);
     }
+
+  // ----------------- NON-ADMIN CLIENT -----------------
   } else {
-    //klient i zakonshem (vetem read)
     server.send(`Server mori: "${message}"`, rinfo.port, rinfo.address);
   }
 });
